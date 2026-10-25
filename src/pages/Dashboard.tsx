@@ -111,7 +111,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectCalculator }) => {
                   CivilCalc AI
                 </span>
                 <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-sky-950/80 text-sky-300 border border-sky-700/50">
-                  Milestone 1 Setup
+                  Phase 1
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">Structural & Civil Engineering Analysis Suite</p>

@@ -72,6 +72,24 @@ describe('Shear Force & Bending Moment Diagrams Engine (Milestone 4)', () => {
       expect(zeroV.some(loc => Math.abs(loc - 3.0) < 0.05)).toBe(true);
     });
 
+    it('finds the exact moment maximum when distributed loads overlap', () => {
+      const beam: BeamModel = {
+        type: 'simply-supported', span: 10,
+        supportA: { position: 0 }, supportB: { position: 10 },
+        pointLoads: [],
+        uniformLoads: [
+          { id: 'full', start: 0, end: 10, magnitude: 1000 },
+          { id: 'partial', start: 4, end: 8, magnitude: 3000 },
+        ],
+        pointMoments: [],
+      };
+
+      const result = solveBeamDiagrams(beam);
+      expect(result.isValid).toBe(true);
+      expect(result.maxMoment.location).toBeCloseTo(5.45, 8);
+      expect(result.maxMoment.value).toBeCloseTo(result.momentAt(5.45), 8);
+    });
+
     it('Benchmark 3: SS Off-Center Point Load (L = 6 m, P = 12 kN at a = 2 m)', () => {
       // Hand calculation:
       // R_B = 12 * 2 / 6 = 4 kN

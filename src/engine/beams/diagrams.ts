@@ -61,6 +61,49 @@ export function solveBeamDiagrams(beam: BeamModel): BeamDiagramsResult {
     };
   }
 
+  // Reflect right-fixed cantilevers about the beam midpoint. In the reflected
+  // model the fixed end is on the left; vertical shear changes sign under the
+  // reflection while bending moment retains the same sagging/hogging sign.
+  if (beam.type === 'cantilever' && beam.fixedEnd === 'right') {
+    const reflectedBeam: BeamModel = {
+      ...beam,
+      fixedEnd: 'left',
+      pointLoads: beam.pointLoads.map(load => ({ ...load, position: beam.span - load.position })),
+      uniformLoads: beam.uniformLoads.map(load => ({
+        ...load,
+        start: beam.span - load.end,
+        end: beam.span - load.start,
+      })),
+      pointMoments: beam.pointMoments.map(moment => ({
+        ...moment,
+        position: beam.span - moment.position,
+        magnitude: -moment.magnitude,
+      })),
+    };
+    const reflected = solveBeamDiagrams(reflectedBeam);
+    const reflectLocation = (x: number) => beam.span - x;
+    return {
+      ...reflected,
+      points: reflected.points.map(point => ({ ...point, x: reflectLocation(point.x), shear: -point.shear }))
+        .sort((a, b) => a.x - b.x),
+      shearAt: (x: number) => {
+        const value = reflected.shearAt(reflectLocation(x));
+        return { left: -value.right, right: -value.left };
+      },
+      momentAt: (x: number) => reflected.momentAt(reflectLocation(x)),
+      momentEvaluatedAt: (x: number) => {
+        const value = reflected.momentEvaluatedAt(reflectLocation(x));
+        return { left: value.right, right: value.left };
+      },
+      maxShear: { value: -reflected.minShear.value, location: reflectLocation(reflected.minShear.location) },
+      minShear: { value: -reflected.maxShear.value, location: reflectLocation(reflected.maxShear.location) },
+      maxMoment: { ...reflected.maxMoment, location: reflectLocation(reflected.maxMoment.location) },
+      minMoment: { ...reflected.minMoment, location: reflectLocation(reflected.minMoment.location) },
+      zeroShearLocations: reflected.zeroShearLocations.map(reflectLocation).sort((a, b) => a - b),
+      inflectionPoints: reflected.inflectionPoints.map(reflectLocation).sort((a, b) => a - b),
+    };
+  }
+
   const L = beam.span;
   const isSS = beam.type === 'simply-supported';
   const xA = isSS ? (beam.supportA?.position ?? 0) : (beam.fixedEnd === 'left' ? 0 : L);
@@ -187,18 +230,30 @@ export function solveBeamDiagrams(beam: BeamModel): BeamDiagramsResult {
 
   // Find locations of zero shear (inside UDLs)
   const zeroShearLocations: number[] = [];
-  for (const ul of beam.uniformLoads) {
-    if (ul.magnitude > 0) {
-      const vStart = evaluateShear(ul.start, 'right');
-      const vEnd = evaluateShear(ul.end, 'left');
-      if (vStart * vEnd <= 0 && Math.abs(vStart - vEnd) > EPS) {
-        // Linear shear: V(x) = vStart - w*(x - ul.start) = 0 => x = ul.start + vStart / w
-        const xZero = ul.start + vStart / ul.magnitude;
-        if (xZero >= ul.start - EPS && xZero <= ul.end + EPS) {
-          const clamped = Math.max(0, Math.min(L, xZero));
-          zeroShearLocations.push(clamped);
-          criticalStations.add(clamped);
-        }
+  const shearStations = Array.from(criticalStations).sort((a, b) => a - b);
+  for (let i = 0; i < shearStations.length - 1; i++) {
+    const start = shearStations[i];
+    const end = shearStations[i + 1];
+    const intervalLength = end - start;
+    if (intervalLength <= EPS) continue;
+
+    // Overlapping UDLs combine, so use the total intensity in each interval.
+    const midpoint = (start + end) / 2;
+    const totalIntensity = beam.uniformLoads.reduce(
+      (sum, load) => midpoint >= load.start && midpoint < load.end ? sum + load.magnitude : sum,
+      0,
+    );
+    if (Math.abs(totalIntensity) <= EPS) continue;
+
+    const vStart = evaluateShear(start, 'right');
+    const vEnd = evaluateShear(end, 'left');
+    if (vStart * vEnd <= 0 && Math.abs(vStart - vEnd) > EPS) {
+      // V(x) = V(start) - w_total*(x - start) within this interval.
+      const xZero = start + vStart / totalIntensity;
+      if (xZero >= start - EPS && xZero <= end + EPS) {
+        const clamped = Math.max(0, Math.min(L, xZero));
+        zeroShearLocations.push(clamped);
+        criticalStations.add(clamped);
       }
     }
   }
@@ -283,9 +338,8 @@ export function solveBeamDiagrams(beam: BeamModel): BeamDiagramsResult {
   for (const st of sortedStations) {
     testExtremumAt(st);
   }
-  for (let i = 0; i <= numSampleIntervals; i++) {
-    testExtremumAt(i * dx);
-  }
+  // Analytical candidates are all load/support discontinuities and zero-shear
+  // locations. Plot samples are deliberately not used to report extrema.
 
   // Detect inflection points where moment crosses zero
   const inflectionPoints: number[] = [];

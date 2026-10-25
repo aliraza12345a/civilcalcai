@@ -241,5 +241,18 @@ describe('Cross-Section Properties Engine (Milestone 6)', () => {
       expect(res.isValid).toBe(false);
       expect(res.errorMessage).toMatch(/positive/i);
     });
+
+    it('rejects infinite dimensions and non-finite composite coordinates', () => {
+      const infiniteRectangle: RectangleSection = {
+        type: 'rectangle', width: Number.POSITIVE_INFINITY, height: 0.4,
+      };
+      expect(calculateSectionProperties(infiniteRectangle).isValid).toBe(false);
+
+      const invalidComposite: CompositeSection = {
+        type: 'composite',
+        rectangles: [{ id: 'r1', x: Number.NaN, y: 0, width: 0.2, height: 0.1 }],
+      };
+      expect(calculateSectionProperties(invalidComposite).isValid).toBe(false);
+    });
   });
 });

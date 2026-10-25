@@ -52,15 +52,13 @@ export function solveBeamReactions(beam: BeamModel): BeamReactionsResult {
     // Applied CCW moments add positively (+M)
     let loadMomentAboutA = 0;
     const momentTermsStr: string[] = [];
-    const forceTermsStr: string[] = [];
 
     // 1. Point loads
     for (const pl of beam.pointLoads) {
       const arm = pl.position - xA;
       const momentContribution = -pl.magnitude * arm;
       loadMomentAboutA += momentContribution;
-      momentTermsStr.push(`(-${pl.magnitude.toFixed(1)} N × ${arm.toFixed(2)} m)`);
-      forceTermsStr.push(`(-${pl.magnitude.toFixed(1)} N)`);
+      momentTermsStr.push(`(${(-pl.magnitude).toFixed(1)} N × ${arm.toFixed(2)} m)`);
     }
 
     // 2. Uniform loads
@@ -71,14 +69,13 @@ export function solveBeamReactions(beam: BeamModel): BeamReactionsResult {
       const arm = centroid - xA;
       const momentContribution = -totalLoad * arm;
       loadMomentAboutA += momentContribution;
-      momentTermsStr.push(`(-${ul.magnitude.toFixed(1)} N/m × ${length.toFixed(2)} m × ${arm.toFixed(2)} m)`);
-      forceTermsStr.push(`(-${ul.magnitude.toFixed(1)} N/m × ${length.toFixed(2)} m)`);
+      momentTermsStr.push(`(${(-ul.magnitude).toFixed(1)} N/m × ${length.toFixed(2)} m × ${arm.toFixed(2)} m)`);
     }
 
     // 3. Applied point moments (Counterclockwise = positive)
     for (const pm of beam.pointMoments) {
       loadMomentAboutA += pm.magnitude;
-      momentTermsStr.push(`(+${pm.magnitude.toFixed(1)} N·m)`);
+      momentTermsStr.push(`(${pm.magnitude >= 0 ? '+' : ''}${pm.magnitude.toFixed(1)} N·m)`);
     }
 
     // Equilibrium about A:
@@ -168,7 +165,7 @@ export function solveBeamReactions(beam: BeamModel): BeamReactionsResult {
       const arm = pl.position - xFixed;
       const contribution = -pl.magnitude * arm;
       loadMomentAboutFixed += contribution;
-      momentTermsStr.push(`(-${pl.magnitude.toFixed(1)} N × ${arm.toFixed(2)} m)`);
+      momentTermsStr.push(`(${(-pl.magnitude).toFixed(1)} N × ${arm.toFixed(2)} m)`);
     }
 
     for (const ul of beam.uniformLoads) {
@@ -178,12 +175,12 @@ export function solveBeamReactions(beam: BeamModel): BeamReactionsResult {
       const arm = centroid - xFixed;
       const contribution = -totalLoad * arm;
       loadMomentAboutFixed += contribution;
-      momentTermsStr.push(`(-${ul.magnitude.toFixed(1)} N/m × ${length.toFixed(2)} m × ${arm.toFixed(2)} m)`);
+      momentTermsStr.push(`(${(-ul.magnitude).toFixed(1)} N/m × ${length.toFixed(2)} m × ${arm.toFixed(2)} m)`);
     }
 
     for (const pm of beam.pointMoments) {
       loadMomentAboutFixed += pm.magnitude;
-      momentTermsStr.push(`(+${pm.magnitude.toFixed(1)} N·m)`);
+      momentTermsStr.push(`(${pm.magnitude >= 0 ? '+' : ''}${pm.magnitude.toFixed(1)} N·m)`);
     }
 
     // Fixed reaction moment M_fixed (CCW is positive):

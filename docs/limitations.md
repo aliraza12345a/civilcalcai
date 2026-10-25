@@ -22,3 +22,11 @@
 3. **Validation & Checks**:
    - The engine validates numerical inputs: span lengths must be strictly positive, load coordinates must remain within span bounds, and stiffness values ($E, I$) must be non-zero positive numbers.
    - Static equilibrium checks ($\Sigma F_y \approx 0$, $\Sigma M \approx 0$) are performed and reported with numerical residuals.
+
+4. **Loads at Supports**:
+   - A point force placed exactly at a support is accepted at that coordinate and included in the force and moment equilibrium sums.
+   - The support reaction and applied force occur at the same station; their algebraic sum determines the shear jump across that station. The load is not shifted into the span.
+
+5. **Not Included in Phase 1**:
+   - Statically indeterminate beams, triangular or trapezoidal loads, torsion, axial force, shear deformation, stability checks, and code-based member design are not solved.
+   - The app does not decide whether a structure is safe or suitable to build.

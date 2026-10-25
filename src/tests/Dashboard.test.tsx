@@ -7,7 +7,7 @@ describe('Dashboard Component (Milestone 1)', () => {
     render(<Dashboard />);
     const brandElements = screen.getAllByText('CivilCalc AI');
     expect(brandElements.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Milestone 1 Setup')).toBeInTheDocument();
+    expect(screen.getByText('Phase 1')).toBeInTheDocument();
   });
 
   it('renders the mandatory limitations and educational disclaimer notice', () => {

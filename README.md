@@ -10,7 +10,7 @@ CivilCalc AI delivers deterministic, verified numerical solutions with step-by-s
 
 > **CivilCalc AI is an educational and preliminary calculation tool. Results depend on the inputs and assumptions shown. It does not replace independent verification, the applicable design codes, or the judgement of a licensed engineer. Do not use these results as the only basis for the design or construction of any structure.**
 
-See [docs/limitations.md](file:///c:/Users/Aliraza/Desktop/civilcalcai/docs/limitations.md) and [docs/sign-conventions.md](file:///c:/Users/Aliraza/Desktop/civilcalcai/docs/sign-conventions.md) for full mechanics assumptions and sign conventions.
+See [docs/limitations.md](docs/limitations.md), [docs/sign-conventions.md](docs/sign-conventions.md), and [docs/equations.md](docs/equations.md) for the supported cases, assumptions, equations, and sign conventions.
 
 ---
 

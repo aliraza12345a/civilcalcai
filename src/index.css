@@ -6,6 +6,11 @@
   body {
     @apply bg-slate-950 text-slate-100 font-sans selection:bg-brand-500 selection:text-white;
   }
+
+  :focus-visible {
+    outline: 2px solid #38bdf8;
+    outline-offset: 2px;
+  }
 }
 
 /* Custom engineering blueprint grid background */
@@ -21,4 +26,47 @@
   background-image: 
     linear-gradient(to right, rgba(56, 189, 248, 0.03) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .report-print-root,
+  .report-print-root * {
+    visibility: visible !important;
+  }
+
+  .report-print-root {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: #fff !important;
+    backdrop-filter: none !important;
+  }
+
+  .report-print-card {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .report-print-content {
+    height: auto !important;
+    overflow: visible !important;
+  }
 }

@@ -182,7 +182,7 @@ export function solveGeneralDeflection(
     };
   }
 
-  if (params.E <= 0 || params.I <= 0) {
+  if (!Number.isFinite(params.E) || !Number.isFinite(params.I) || params.E <= 0 || params.I <= 0) {
     return {
       isValid: false,
       errorMessage: 'Modulus of Elasticity (E) and Second Moment of Area (I) must be strictly positive numbers.',
@@ -198,7 +198,33 @@ export function solveGeneralDeflection(
   }
 
   const EI = params.E * params.I;
+  if (!Number.isFinite(EI) || EI <= 0) {
+    return {
+      isValid: false,
+      errorMessage: 'The product E·I must be a finite, strictly positive value.',
+      EI: 0,
+      deflectionAt: () => 0,
+      slopeAt: () => 0,
+      momentAt: () => 0,
+      points: [],
+      maxDeflection: { value: 0, magnitude: 0, location: 0 },
+      maxSlope: { value: 0, magnitude: 0, location: 0 },
+      assumptions: []
+    };
+  }
   const L = beam.span;
+  const criticalPositions = [
+    0,
+    L,
+    ...beam.pointLoads.map(load => load.position),
+    ...beam.uniformLoads.flatMap(load => [load.start, load.end]),
+    ...beam.pointMoments.map(moment => moment.position),
+    ...(beam.type === 'simply-supported'
+      ? [beam.supportA?.position ?? 0, beam.supportB?.position ?? L]
+      : []),
+  ].filter(position => Number.isFinite(position) && position >= 0 && position <= L)
+    .sort((a, b) => a - b)
+    .filter((position, index, positions) => index === 0 || position !== positions[index - 1]);
 
   let C1 = 0;
   let C2 = 0;
@@ -273,7 +299,7 @@ export function solveGeneralDeflection(
       return (rawDeflectionIntegral(x) + C1 * x + C2) / EI;
     };
 
-    return generateDeflectionResult(L, EI, momentAt, slopeAt, deflectionAt);
+    return generateDeflectionResult(L, EI, momentAt, slopeAt, deflectionAt, criticalPositions);
   } else {
     // Cantilever Beam
     const isLeft = beam.fixedEnd === 'left';
@@ -337,7 +363,7 @@ export function solveGeneralDeflection(
         return (rawDeflectionIntegral(x) + C1 * x + C2) / EI;
       };
 
-      return generateDeflectionResult(L, EI, momentAt, slopeAt, deflectionAt);
+      return generateDeflectionResult(L, EI, momentAt, slopeAt, deflectionAt, criticalPositions);
     } else {
       // Fixed at Right (x = L). Free at x = 0.
       // Looking from left (x = 0): no support at x = 0
@@ -400,7 +426,7 @@ export function solveGeneralDeflection(
         return (rawDeflectionIntegral(x) + C1 * x + C2) / EI;
       };
 
-      return generateDeflectionResult(L, EI, momentAt, slopeAt, deflectionAt);
+      return generateDeflectionResult(L, EI, momentAt, slopeAt, deflectionAt, criticalPositions);
     }
   }
 }
@@ -413,16 +439,17 @@ function generateDeflectionResult(
   EI: number,
   momentAt: (x: number) => number,
   slopeAt: (x: number) => number,
-  deflectionAt: (x: number) => number
+  deflectionAt: (x: number) => number,
+  criticalPositions: number[]
 ): GeneralDeflectionResult {
   const SAMPLES = 100;
   const points: DeflectionPoint[] = [];
 
-  let maxDeflMag = -1;
+  let maxDeflMag = 0;
   let maxDeflVal = 0;
   let maxDeflLoc = 0;
 
-  let maxSlopeMag = -1;
+  let maxSlopeMag = 0;
   let maxSlopeVal = 0;
   let maxSlopeLoc = 0;
 
@@ -434,33 +461,28 @@ function generateDeflectionResult(
 
     points.push({ x, deflection: y, slope: theta, moment: M });
 
-    const yMag = Math.abs(y);
-    if (yMag > maxDeflMag) {
-      maxDeflMag = yMag;
+  }
+
+  const slopeRoots = findRootsInIntervals(slopeAt, criticalPositions, L);
+  const momentRoots = findRootsInIntervals(momentAt, criticalPositions, L);
+  const deflectionCandidates = [...criticalPositions, ...slopeRoots];
+  const slopeCandidates = [...criticalPositions, ...momentRoots];
+
+  for (const x of deflectionCandidates) {
+    const y = deflectionAt(x);
+    if (Math.abs(y) > maxDeflMag) {
+      maxDeflMag = Math.abs(y);
       maxDeflVal = y;
       maxDeflLoc = x;
-    }
-
-    const thetaMag = Math.abs(theta);
-    if (thetaMag > maxSlopeMag) {
-      maxSlopeMag = thetaMag;
-      maxSlopeVal = theta;
-      maxSlopeLoc = x;
     }
   }
 
-  // Refine maximum deflection location using fine sampling around maxDeflLoc
-  const fineStep = L / 1000;
-  const searchStart = Math.max(0, maxDeflLoc - fineStep * 10);
-  const searchEnd = Math.min(L, maxDeflLoc + fineStep * 10);
-
-  for (let x = searchStart; x <= searchEnd; x += fineStep / 10) {
-    const y = deflectionAt(x);
-    const yMag = Math.abs(y);
-    if (yMag > maxDeflMag) {
-      maxDeflMag = yMag;
-      maxDeflVal = y;
-      maxDeflLoc = x;
+  for (const x of slopeCandidates) {
+    const theta = slopeAt(x);
+    if (Math.abs(theta) > maxSlopeMag) {
+      maxSlopeMag = Math.abs(theta);
+      maxSlopeVal = theta;
+      maxSlopeLoc = x;
     }
   }
 
@@ -491,4 +513,72 @@ function generateDeflectionResult(
     },
     assumptions
   };
+}
+
+/** Finds sign-changing roots on each piecewise-polynomial load interval. */
+function findRootsInIntervals(
+  fn: (x: number) => number,
+  stations: number[],
+  span: number,
+): number[] {
+  const roots: number[] = [];
+  const addRoot = (root: number) => {
+    const tolerance = Math.max(1, span) * 1e-10;
+    if (!roots.some(existing => Math.abs(existing - root) <= tolerance)) roots.push(root);
+  };
+
+  for (let interval = 0; interval < stations.length - 1; interval++) {
+    const start = stations[interval];
+    const end = stations[interval + 1];
+    if (end <= start) continue;
+
+    // The integrated curves are low-degree polynomials between load events.
+    // Subdivision finds each sign change; bisection then refines its position.
+    const subdivisions = 24;
+    let previousX = start;
+    let previousValue = fn(previousX);
+    const values: Array<{ x: number; value: number }> = [{ x: previousX, value: previousValue }];
+
+    for (let step = 1; step <= subdivisions; step++) {
+      const endpointOffset = Math.max(1, span) * 1e-14;
+      const x = step === subdivisions
+        ? Math.max(start, end - endpointOffset)
+        : start + (end - start) * step / subdivisions;
+      const value = fn(x);
+      values.push({ x, value });
+
+      if (Number.isFinite(previousValue) && Number.isFinite(value) && previousValue * value < 0) {
+        let low = previousX;
+        let high = x;
+        let lowValue = previousValue;
+        for (let iteration = 0; iteration < 80; iteration++) {
+          const middle = (low + high) / 2;
+          const middleValue = fn(middle);
+          if (middleValue === 0 || high - low <= Math.max(1, span) * 1e-13) {
+            low = middle;
+            high = middle;
+            break;
+          }
+          if (lowValue * middleValue < 0) {
+            high = middle;
+          } else {
+            low = middle;
+            lowValue = middleValue;
+          }
+        }
+        addRoot((low + high) / 2);
+      }
+
+      previousX = x;
+      previousValue = value;
+    }
+
+    for (let index = 1; index < values.length - 1; index++) {
+      if (values[index].value === 0 && (values[index - 1].value !== 0 || values[index + 1].value !== 0)) {
+        addRoot(values[index].x);
+      }
+    }
+  }
+
+  return roots.sort((a, b) => a - b);
 }

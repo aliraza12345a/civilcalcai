@@ -16,9 +16,10 @@ All calculation engine modules in `src/engine/`, diagram renderers, tabular outp
 ## 2. External Loads
 - **Concentrated (Point) Loads ($P$)**:
   - Downward gravity point loads are entered with positive magnitude ($P > 0$) and act in the **$-y$ direction** (downward).
-  - An upward load acts in the **$+y$ direction**.
+  - Upward point loads are entered with negative magnitude ($P < 0$) and act in the **$+y$ direction**.
 - **Uniformly Distributed Loads ($w$)**:
   - Downward distributed loads are entered with positive magnitude ($w > 0$) and act in the **$-y$ direction** (downward).
+  - Upward distributed loads are entered with negative magnitude ($w < 0$) and act in the **$+y$ direction**.
 - **Concentrated Moments ($M_{applied}$)**:
   - **Counterclockwise (CCW)** moments are **positive** ($+M$).
   - **Clockwise (CW)** moments are **negative** ($-M$).

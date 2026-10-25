@@ -10,7 +10,11 @@ import {
   Layers,
   Scale,
   Calculator,
-  Compass
+  Compass,
+  History,
+  Save,
+  Printer,
+  BookOpen
 } from 'lucide-react';
 import { 
   BeamModel, 
@@ -20,6 +24,7 @@ import {
   BeamType 
 } from '../engine/beams/types';
 import { solveBeamReactions } from '../engine/beams/reactions';
+import { solveBeamDiagrams } from '../engine/beams/diagrams';
 import { 
   solveGeneralDeflection, 
   solveStandardDeflection,
@@ -36,6 +41,11 @@ import {
   InertiaUnit
 } from '../engine/units';
 import { DeflectionDiagram } from '../components/DeflectionDiagram';
+import { InteractiveBeamVisualizer } from '../components/InteractiveBeamVisualizer';
+import { CalculationHistoryModal } from '../components/CalculationHistoryModal';
+import { PrintReportModal } from '../components/PrintReportModal';
+import { generateBeamExplanation } from '../engine/explanations/generator';
+import { SavedBeamCalculation, saveBeamCalculation } from '../engine/history/storage';
 
 interface BeamWorkspaceProps {
   onBack: () => void;
@@ -92,9 +102,43 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
   ]);
   const [uniformLoads, setUniformLoads] = useState<Array<{ id: string; start: number; end: number; magnitude: number }>>([]);
   const [pointMoments, setPointMoments] = useState<Array<{ id: string; position: number; magnitude: number }>>([]);
+  const [activeTab, setActiveTab] = useState<'reactions' | 'deflection' | 'equations' | 'diagrams' | 'explanation'>('reactions');
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
+  const [savedCalculationId, setSavedCalculationId] = useState<string | undefined>();
+  const [saveMessage, setSaveMessage] = useState('');
 
-  // Active Tab
-  const [activeTab, setActiveTab] = useState<'reactions' | 'deflection' | 'equations' | 'diagrams'>('reactions');
+  const loadExample = (example: string) => {
+    const metric = unitSystem === 'metric';
+    const length = metric ? 6 : 20;
+    const force = metric ? 10 : 10;
+    const udl = metric ? 5 : 0.5;
+    setSpanInput(length);
+    if (example === 'ss-point') {
+      setBeamType('simply-supported');
+      setPointLoads([{ id: 'example-point', position: length / 2, magnitude: force }]);
+      setUniformLoads([]);
+      setPointMoments([]);
+    } else if (example === 'ss-udl') {
+      setBeamType('simply-supported');
+      setPointLoads([]);
+      setUniformLoads([{ id: 'example-udl', start: 0, end: length, magnitude: udl }]);
+      setPointMoments([]);
+    } else if (example === 'cantilever-point') {
+      setBeamType('cantilever');
+      setFixedEnd('left');
+      setPointLoads([{ id: 'example-tip', position: length, magnitude: force }]);
+      setUniformLoads([]);
+      setPointMoments([]);
+    } else if (example === 'cantilever-udl') {
+      setBeamType('cantilever');
+      setFixedEnd('left');
+      setPointLoads([]);
+      setUniformLoads([{ id: 'example-cantilever-udl', start: 0, end: length, magnitude: udl }]);
+      setPointMoments([]);
+    }
+    setActiveTab('diagrams');
+  };
 
   // Convert inputs into Base SI for the pure calculation engine
   const siBeamModel = useMemo<BeamModel>(() => {
@@ -150,10 +194,68 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
     return solveBeamReactions(siBeamModel);
   }, [siBeamModel]);
 
+  const diagramsResult = useMemo(() => solveBeamDiagrams(siBeamModel), [siBeamModel]);
+
+  const currentCalculation: Omit<SavedBeamCalculation, 'id' | 'createdAt' | 'updatedAt'> = {
+    title: `${beamType === 'simply-supported' ? 'Simply supported' : 'Cantilever'} beam · ${new Date().toLocaleString()}`,
+    unitSystem,
+    beamType,
+    fixedEnd,
+    spanInput,
+    lengthUnit,
+    forceUnit,
+    distLoadUnit,
+    momentUnit,
+    selectedPreset,
+    eValue,
+    eUnit,
+    iValue,
+    iUnit,
+    pointLoads,
+    uniformLoads,
+    pointMoments,
+  };
+
+  const handleSaveCalculation = () => {
+    const saved = saveBeamCalculation(currentCalculation, savedCalculationId);
+    if (saved) {
+      setSavedCalculationId(saved.id);
+      setSaveMessage('Saved in this browser.');
+    } else {
+      setSaveMessage('Could not save. Browser storage may be unavailable or full.');
+    }
+  };
+
+  const handleLoadCalculation = (calculation: SavedBeamCalculation) => {
+    setUnitSystem(calculation.unitSystem);
+    setBeamType(calculation.beamType);
+    setFixedEnd(calculation.fixedEnd);
+    setSpanInput(calculation.spanInput);
+    setSelectedPreset(calculation.selectedPreset);
+    setEValue(calculation.eValue);
+    setEUnit(calculation.eUnit);
+    setIValue(calculation.iValue);
+    setIUnit(calculation.iUnit);
+    setPointLoads(calculation.pointLoads);
+    setUniformLoads(calculation.uniformLoads);
+    setPointMoments(calculation.pointMoments);
+    setSavedCalculationId(calculation.id);
+    setActiveTab('reactions');
+    setSaveMessage('Loaded saved calculation.');
+  };
+
   // Run general deflection solver
   const deflectionResult = useMemo(() => {
     return solveGeneralDeflection(siBeamModel, { E: eInPa, I: iInM4 });
   }, [siBeamModel, eInPa, iInM4]);
+
+  const explanationResult = useMemo(() => generateBeamExplanation(
+    siBeamModel,
+    results,
+    diagramsResult,
+    deflectionResult,
+    { length: lengthUnit, force: forceUnit, moment: momentUnit },
+  ), [siBeamModel, results, diagramsResult, deflectionResult, lengthUnit, forceUnit, momentUnit]);
 
   // Check if current beam matches a standard canonical case for benchmark validation
   const standardCaseBenchmark = useMemo(() => {
@@ -328,7 +430,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                   Statically Determinate Beam Analyzer
                 </h1>
                 <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-sky-950/80 text-sky-300 border border-sky-700/50">
-                  M5 Deflection Active
+                  Phase 1 Analysis
                 </span>
               </div>
               <p className="text-xs text-slate-400">Pure Analytical Structural Mechanics & Macaulay Deflection</p>
@@ -396,12 +498,46 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
               </span>
             </div>
 
+            <div>
+              <label htmlFor="example-problem" className="block text-xs text-slate-400 mb-1">Try an example problem</label>
+              <select
+                id="example-problem"
+                defaultValue=""
+                onChange={(event) => {
+                  if (event.target.value) loadExample(event.target.value);
+                  event.target.value = '';
+                }}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
+              >
+                <option value="">Choose a sample to fill in the inputs…</option>
+                <option value="ss-point">Simply supported beam · middle point load</option>
+                <option value="ss-udl">Simply supported beam · full span distributed load</option>
+                <option value="cantilever-point">Cantilever · load at the free end</option>
+                <option value="cantilever-udl">Cantilever · full span distributed load</option>
+              </select>
+              <p className="text-[10px] text-slate-500 mt-1">Examples fill the fields below. Edit any value to solve your own problem.</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button type="button" onClick={handleSaveCalculation} className="px-2.5 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-xs flex items-center gap-1.5">
+                <Save className="w-3.5 h-3.5" /> Save calculation
+              </button>
+              <button type="button" onClick={() => setIsHistoryOpen(true)} className="px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs flex items-center gap-1.5">
+                <History className="w-3.5 h-3.5" /> Saved calculations
+              </button>
+              <button type="button" onClick={() => setIsReportOpen(true)} disabled={!results.isValid || !diagramsResult.isValid || !deflectionResult.isValid} className="px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xs flex items-center gap-1.5">
+                <Printer className="w-3.5 h-3.5" /> Report / export
+              </button>
+            </div>
+            {saveMessage && <p role="status" className="text-[11px] text-sky-300">{saveMessage}</p>}
+
             <div className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-400 mb-1">Beam Support Configuration</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2" role="group" aria-label="Beam support configuration">
                   <button
                     type="button"
+                    aria-pressed={beamType === 'simply-supported'}
                     onClick={() => setBeamType('simply-supported')}
                     className={`p-2.5 rounded-lg border text-left font-medium transition-all ${
                       beamType === 'simply-supported'
@@ -415,6 +551,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
 
                   <button
                     type="button"
+                    aria-pressed={beamType === 'cantilever'}
                     onClick={() => setBeamType('cantilever')}
                     className={`p-2.5 rounded-lg border text-left font-medium transition-all ${
                       beamType === 'cantilever'
@@ -430,10 +567,11 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
 
               {beamType === 'cantilever' && (
                 <div>
-                  <label className="block text-slate-400 mb-1">Fixed End Position</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <span id="fixed-end-label" className="block text-slate-400 mb-1">Fixed End Position</span>
+                  <div className="grid grid-cols-2 gap-2" role="group" aria-labelledby="fixed-end-label">
                     <button
                       type="button"
+                      aria-pressed={fixedEnd === 'left'}
                       onClick={() => setFixedEnd('left')}
                       className={`py-1.5 px-3 rounded-lg border text-xs text-center ${
                         fixedEnd === 'left'
@@ -445,6 +583,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                     </button>
                     <button
                       type="button"
+                      aria-pressed={fixedEnd === 'right'}
                       onClick={() => setFixedEnd('right')}
                       className={`py-1.5 px-3 rounded-lg border text-xs text-center ${
                         fixedEnd === 'right'
@@ -459,10 +598,11 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
               )}
 
               <div>
-                <label className="block text-slate-400 mb-1">Total Span Length (L)</label>
+                <label htmlFor="beam-span" className="block text-slate-400 mb-1">Total Span Length (L)</label>
                 <div className="flex rounded-lg shadow-sm">
                   <input
                     type="number"
+                    id="beam-span"
                     min="0.1"
                     step="0.1"
                     value={spanInput}
@@ -493,8 +633,9 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1">Material Presets (Typical Values)</label>
+                <label htmlFor="material-preset" className="block text-slate-400 mb-1">Material Presets (Typical Values)</label>
                 <select
+                  id="material-preset"
                   value={selectedPreset}
                   onChange={(e) => handlePresetChange(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
@@ -512,10 +653,11 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 {/* Modulus of Elasticity E */}
                 <div>
-                  <label className="block text-slate-400 mb-1">Elastic Modulus (E)</label>
+                  <label htmlFor="elastic-modulus" className="block text-slate-400 mb-1">Elastic Modulus (E)</label>
                   <div className="flex rounded-md shadow-sm">
                     <input
                       type="number"
+                      id="elastic-modulus"
                       step="any"
                       value={eValue}
                       onChange={(e) => {
@@ -525,6 +667,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                       className="w-full bg-slate-950 border border-slate-800 rounded-l-md px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
                     />
                     <select
+                      aria-label="Elastic modulus unit"
                       value={eUnit}
                       onChange={(e) => setEUnit(e.target.value as StressUnit)}
                       className="bg-slate-800 border border-l-0 border-slate-700 rounded-r-md px-2 py-1 text-[11px] text-slate-300 font-mono"
@@ -539,10 +682,11 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
 
                 {/* Second Moment of Area I */}
                 <div>
-                  <label className="block text-slate-400 mb-1">Moment of Inertia (I)</label>
+                  <label htmlFor="second-moment" className="block text-slate-400 mb-1">Moment of Inertia (I)</label>
                   <div className="flex rounded-md shadow-sm">
                     <input
                       type="number"
+                      id="second-moment"
                       step="any"
                       value={iValue}
                       onChange={(e) => {
@@ -552,6 +696,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                       className="w-full bg-slate-950 border border-slate-800 rounded-l-md px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
                     />
                     <select
+                      aria-label="Second moment of area unit"
                       value={iUnit}
                       onChange={(e) => setIUnit(e.target.value as InertiaUnit)}
                       className="bg-slate-800 border border-l-0 border-slate-700 rounded-r-md px-2 py-1 text-[11px] text-slate-300 font-mono"
@@ -615,7 +760,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
             {/* Point Loads List */}
             <div className="space-y-2 text-xs">
               <div className="font-semibold text-slate-400 text-[11px] uppercase tracking-wider">
-                Concentrated Point Loads (P, downward)
+                Concentrated Point Loads (positive down, negative up)
               </div>
               {pointLoads.length === 0 ? (
                 <div className="text-slate-500 italic py-1 text-center bg-slate-950/40 rounded border border-slate-900">
@@ -631,6 +776,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                         <div className="flex items-center">
                           <input
                             type="number"
+                            aria-label={`Point load ${idx + 1} position in ${lengthUnit}`}
                             step="0.1"
                             value={pl.position}
                             onChange={(e) => {
@@ -647,6 +793,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                         <div className="flex items-center">
                           <input
                             type="number"
+                            aria-label={`Point load ${idx + 1} magnitude in ${forceUnit}`}
                             step="0.1"
                             value={pl.magnitude}
                             onChange={(e) => {
@@ -661,6 +808,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                     </div>
                     <button
                       onClick={() => removePointLoad(pl.id)}
+                      aria-label={`Remove point load ${idx + 1}`}
                       className="text-slate-500 hover:text-rose-400 p-1"
                       title="Remove load"
                     >
@@ -674,7 +822,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
             {/* Uniform Loads List */}
             <div className="space-y-2 text-xs pt-1">
               <div className="font-semibold text-slate-400 text-[11px] uppercase tracking-wider">
-                Uniformly Distributed Loads (w, downward)
+                Uniformly Distributed Loads (positive down, negative up)
               </div>
               {uniformLoads.length === 0 ? (
                 <div className="text-slate-500 italic py-1 text-center bg-slate-950/40 rounded border border-slate-900">
@@ -687,17 +835,19 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                       <span className="font-mono text-sky-400 font-bold">UDL {idx + 1}</span>
                       <button
                         onClick={() => removeUniformLoad(ul.id)}
+                        aria-label={`Remove uniform load ${idx + 1}`}
                         className="text-slate-500 hover:text-rose-400 p-1"
                         title="Remove load"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <div>
                         <label className="text-[10px] text-slate-400 block">Start (x)</label>
                         <input
                           type="number"
+                          aria-label={`Uniform load ${idx + 1} start position in ${lengthUnit}`}
                           step="0.1"
                           value={ul.start}
                           onChange={(e) => {
@@ -711,6 +861,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                         <label className="text-[10px] text-slate-400 block">End (x)</label>
                         <input
                           type="number"
+                          aria-label={`Uniform load ${idx + 1} end position in ${lengthUnit}`}
                           step="0.1"
                           value={ul.end}
                           onChange={(e) => {
@@ -724,6 +875,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                         <label className="text-[10px] text-slate-400 block">Load (w)</label>
                         <input
                           type="number"
+                          aria-label={`Uniform load ${idx + 1} magnitude in ${distLoadUnit}`}
                           step="0.1"
                           value={ul.magnitude}
                           onChange={(e) => {
@@ -758,6 +910,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                         <div className="flex items-center">
                           <input
                             type="number"
+                            aria-label={`Applied moment ${idx + 1} position in ${lengthUnit}`}
                             step="0.1"
                             value={pm.position}
                             onChange={(e) => {
@@ -774,6 +927,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                         <div className="flex items-center">
                           <input
                             type="number"
+                            aria-label={`Applied moment ${idx + 1} magnitude in ${momentUnit}`}
                             step="0.1"
                             value={pm.magnitude}
                             onChange={(e) => {
@@ -788,6 +942,7 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                     </div>
                     <button
                       onClick={() => removePointMoment(pm.id)}
+                      aria-label={`Remove applied moment ${idx + 1}`}
                       className="text-slate-500 hover:text-rose-400 p-1"
                       title="Remove moment"
                     >
@@ -814,7 +969,6 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
             >
               <Compass className="w-3.5 h-3.5" />
               <span>Slope & Deflection</span>
-              <span className="text-[9px] bg-emerald-950 text-emerald-300 border border-emerald-800/60 px-1.5 py-0.5 rounded">M5</span>
             </button>
 
             <button
@@ -850,7 +1004,14 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
               }`}
             >
               <span>Diagrams (SFD / BMD)</span>
-              <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">M4</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('explanation')}
+              className={`px-3 py-2 rounded-lg transition-all flex items-center space-x-1.5 ${activeTab === 'explanation' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-900'}`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Plain English</span>
             </button>
           </div>
 
@@ -1000,9 +1161,9 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
                     <Scale className="w-4 h-4 text-emerald-400" />
                     <span>Independent Static Equilibrium Verification</span>
                   </div>
-                  <span className="flex items-center space-x-1 text-xs font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-2 py-0.5 rounded-full">
+                  <span className={`flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-full ${results.equilibrium.isEquilibrium ? 'text-emerald-400 bg-emerald-950/60 border border-emerald-800/50' : 'text-rose-300 bg-rose-950/60 border border-rose-800/50'}`}>
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Equilibrium Satisfied</span>
+                    <span>{results.equilibrium.isEquilibrium ? 'Residuals within tolerance' : 'Residuals exceed tolerance'}</span>
                   </span>
                 </div>
 
@@ -1062,22 +1223,68 @@ export const BeamWorkspace: React.FC<BeamWorkspaceProps> = ({
             </div>
           )}
 
-          {/* TAB: Diagrams Placeholder (M4 Roadmap) */}
-          {activeTab === 'diagrams' && (
-            <div className="p-8 rounded-xl bg-slate-900/40 border border-dashed border-slate-800 text-center space-y-3">
-              <div className="w-12 h-12 rounded-xl bg-slate-800 text-sky-400 flex items-center justify-center mx-auto">
-                <Layers className="w-6 h-6" />
+          {activeTab === 'diagrams' && results.isValid && deflectionResult.isValid && diagramsResult.isValid && (
+            <InteractiveBeamVisualizer
+              beamModel={siBeamModel}
+              reactionsResult={results}
+              diagramsResult={diagramsResult}
+              deflectionResult={deflectionResult}
+              lengthUnit={lengthUnit}
+              forceUnit={forceUnit}
+              distLoadUnit={distLoadUnit}
+              momentUnit={momentUnit}
+            />
+          )}
+
+          {activeTab === 'explanation' && results.isValid && deflectionResult.isValid && diagramsResult.isValid && (
+            <section className="space-y-4" aria-labelledby="plain-english-heading">
+              <div className="p-4 rounded-xl bg-sky-950/40 border border-sky-700/50">
+                <h2 id="plain-english-heading" className="text-sm font-semibold text-sky-200">What these results mean</h2>
+                <p className="mt-2 text-sm text-slate-200 leading-relaxed">{explanationResult.overview}</p>
               </div>
-              <h3 className="font-semibold text-slate-200 text-sm">
-                Dedicated Standalone SFD & BMD Interactive Diagrams
-              </h3>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Per the project plan roadmap, the standalone interactive SFD / BMD suite is slated for <strong>Milestone 4</strong>. (The aligned BMD is already visible in the <strong>Slope & Deflection</strong> tab).
-              </p>
-            </div>
+              {explanationResult.sections.map(section => (
+                <article key={section.category} className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-sky-300">{section.title}</h3>
+                  <p className="text-sm text-slate-200">{section.summary}</p>
+                  <ul className="list-disc pl-5 text-xs text-slate-400 space-y-1">
+                    {section.details.map((detail, index) => <li key={index}>{detail}</li>)}
+                  </ul>
+                </article>
+              ))}
+              <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-300">Key points</h3>
+                <ul className="list-disc pl-5 mt-2 text-xs text-slate-400 space-y-1">
+                  {explanationResult.keyTakeaways.map((takeaway, index) => <li key={index}>{takeaway}</li>)}
+                </ul>
+              </div>
+            </section>
           )}
         </div>
       </main>
+
+      <CalculationHistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        onLoadCalculation={handleLoadCalculation}
+      />
+      {isReportOpen && results.isValid && diagramsResult.isValid && deflectionResult.isValid && (
+        <PrintReportModal
+          isOpen={isReportOpen}
+          onClose={() => setIsReportOpen(false)}
+          beamModel={siBeamModel}
+          reactionsResult={results}
+          diagramsResult={diagramsResult}
+          deflectionResult={deflectionResult}
+          lengthUnit={lengthUnit}
+          forceUnit={forceUnit}
+          distLoadUnit={distLoadUnit}
+          momentUnit={momentUnit}
+          eValue={eValue}
+          eUnit={eUnit}
+          iValue={iValue}
+          iUnit={iUnit}
+        />
+      )}
     </div>
   );
 };

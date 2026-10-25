@@ -6,6 +6,46 @@ import {
 } from '../engine/beams/deflection';
 import { BeamModel } from '../engine/beams/types';
 
+/** Small independent Euler-Bernoulli FE model used only to cross-check the solver. */
+function femNodalDeflections(EI: number, span: number, elements: number, loads: Array<{ node: number; force: number }>, support: 'simple' | 'cantilever'): number[] {
+  const nodeCount = elements + 1;
+  const dofCount = nodeCount * 2;
+  const stiffness = Array.from({ length: dofCount }, () => Array(dofCount).fill(0));
+  const force = Array(dofCount).fill(0);
+  const elementLength = span / elements;
+  const kFactor = EI / elementLength ** 3;
+  const local = [
+    [12, 6 * elementLength, -12, 6 * elementLength],
+    [6 * elementLength, 4 * elementLength ** 2, -6 * elementLength, 2 * elementLength ** 2],
+    [-12, -6 * elementLength, 12, -6 * elementLength],
+    [6 * elementLength, 2 * elementLength ** 2, -6 * elementLength, 4 * elementLength ** 2],
+  ];
+
+  for (let element = 0; element < elements; element++) {
+    const dofs = [2 * element, 2 * element + 1, 2 * (element + 1), 2 * (element + 1) + 1];
+    dofs.forEach((row, i) => dofs.forEach((column, j) => { stiffness[row][column] += kFactor * local[i][j]; }));
+  }
+  loads.forEach(load => { force[2 * load.node] += load.force; });
+
+  const restrained = support === 'cantilever' ? [0, 1] : [0, 2 * (nodeCount - 1)];
+  const free = Array.from({ length: dofCount }, (_, i) => i).filter(i => !restrained.includes(i));
+  const matrix = free.map(row => [...free.map(column => stiffness[row][column]), force[row]]);
+
+  for (let pivot = 0; pivot < free.length; pivot++) {
+    const divisor = matrix[pivot][pivot];
+    for (let column = pivot; column <= free.length; column++) matrix[pivot][column] /= divisor;
+    for (let row = 0; row < free.length; row++) {
+      if (row === pivot) continue;
+      const factor = matrix[row][pivot];
+      for (let column = pivot; column <= free.length; column++) matrix[row][column] -= factor * matrix[pivot][column];
+    }
+  }
+
+  const displacement = Array(dofCount).fill(0);
+  free.forEach((dof, i) => { displacement[dof] = matrix[i][free.length]; });
+  return Array.from({ length: nodeCount }, (_, node) => displacement[2 * node]);
+}
+
 describe('Beam Slope and Deflection Engine (Milestone 5)', () => {
   // Common material properties: E = 200 GPa, I = 1e-4 m^4 => EI = 20,000 kN*m^2 = 2e7 N*m^2
   const params: DeflectionParameters = {
@@ -96,6 +136,28 @@ describe('Beam Slope and Deflection Engine (Milestone 5)', () => {
   });
 
   describe('General Exact Integration (Macaulay Method) vs Standard Formulas', () => {
+    it('cross-checks nodal deflections against an independent two-element beam FEM', () => {
+      const EI = params.E * params.I;
+      const span = 4;
+      const load = 20000;
+      const ssBeam: BeamModel = {
+        type: 'simply-supported', span,
+        supportA: { position: 0 }, supportB: { position: span },
+        pointLoads: [{ id: 'p1', position: span / 2, magnitude: load }],
+        uniformLoads: [], pointMoments: [],
+      };
+      const cantileverBeam: BeamModel = {
+        type: 'cantilever', span, fixedEnd: 'left',
+        pointLoads: [{ id: 'p1', position: span, magnitude: load }],
+        uniformLoads: [], pointMoments: [],
+      };
+
+      const ssFem = femNodalDeflections(EI, span, 2, [{ node: 1, force: -load }], 'simple');
+      const cantileverFem = femNodalDeflections(EI, span, 2, [{ node: 2, force: -load }], 'cantilever');
+      expect(solveGeneralDeflection(ssBeam, params).deflectionAt(span / 2)).toBeCloseTo(ssFem[1], 11);
+      expect(solveGeneralDeflection(cantileverBeam, params).deflectionAt(span)).toBeCloseTo(cantileverFem[2], 11);
+    });
+
     it('reproduces SS central point load benchmark exactly (L = 4 m, P = 20 kN)', () => {
       const beam: BeamModel = {
         type: 'simply-supported',
@@ -126,6 +188,39 @@ describe('Beam Slope and Deflection Engine (Milestone 5)', () => {
       // Boundary condition checks: deflection is zero at supports
       expect(result.deflectionAt(0)).toBeCloseTo(0, 8);
       expect(result.deflectionAt(4)).toBeCloseTo(0, 8);
+    });
+
+    it('refines an off-center point-load peak to the stationary point of the integrated curve', () => {
+      const beam: BeamModel = {
+        type: 'simply-supported', span: 4,
+        supportA: { position: 0 }, supportB: { position: 4 },
+        pointLoads: [{ id: 'p1', position: 1, magnitude: 20000 }],
+        uniformLoads: [], pointMoments: [],
+      };
+      const result = solveGeneralDeflection(beam, params);
+      const expectedLocation = 4 - Math.sqrt(5);
+      const expectedValue = (
+        2500 * expectedLocation ** 3
+        - (20000 / 6) * (expectedLocation - 1) ** 3
+        - 17500 * expectedLocation
+      ) / (params.E * params.I);
+
+      expect(result.maxDeflection.location).toBeCloseTo(expectedLocation, 10);
+      expect(result.maxDeflection.value).toBeCloseTo(expectedValue, 10);
+    });
+
+    it('handles a right-fixed cantilever peak at its free end', () => {
+      const beam: BeamModel = {
+        type: 'cantilever', span: 3, fixedEnd: 'right',
+        pointLoads: [{ id: 'p1', position: 0, magnitude: 10000 }],
+        uniformLoads: [], pointMoments: [],
+      };
+      const result = solveGeneralDeflection(beam, params);
+      expect(result.isValid).toBe(true);
+      expect(result.maxDeflection.location).toBeCloseTo(0, 10);
+      expect(result.maxDeflection.value).toBeCloseTo(-0.0045, 8);
+      expect(result.deflectionAt(3)).toBeCloseTo(0, 10);
+      expect(result.slopeAt(3)).toBeCloseTo(0, 10);
     });
 
     it('reproduces SS full UDL benchmark exactly (L = 4 m, w = 10 kN/m)', () => {

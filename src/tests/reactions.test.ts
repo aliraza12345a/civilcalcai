@@ -258,5 +258,27 @@ describe('Beam Reactions Calculator (Milestone 3)', () => {
       expect(result.isValid).toBe(false);
       expect(result.errorMessage).toMatch(/position.*span/i);
     });
+
+    it('rejects reversed supports and non-finite numeric inputs', () => {
+      const reversed: BeamModel = {
+        type: 'simply-supported', span: 5,
+        supportA: { position: 4 }, supportB: { position: 1 },
+        pointLoads: [], uniformLoads: [], pointMoments: []
+      };
+      expect(solveBeamReactions(reversed).isValid).toBe(false);
+
+      const infiniteLoad: BeamModel = {
+        type: 'simply-supported', span: 5,
+        pointLoads: [{ id: 'p1', position: 2, magnitude: Number.POSITIVE_INFINITY }],
+        uniformLoads: [], pointMoments: []
+      };
+      expect(solveBeamReactions(infiniteLoad).isValid).toBe(false);
+
+      const infiniteSpan: BeamModel = {
+        type: 'cantilever', span: Number.POSITIVE_INFINITY, fixedEnd: 'left',
+        pointLoads: [], uniformLoads: [], pointMoments: []
+      };
+      expect(solveBeamReactions(infiniteSpan).isValid).toBe(false);
+    });
   });
 });

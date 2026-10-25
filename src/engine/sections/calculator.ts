@@ -9,6 +9,36 @@ import {
  * All computations are analytical and strictly deterministic.
  */
 export function calculateSectionProperties(model: SectionModel): SectionResult {
+  if (!model || typeof model !== 'object' || !('type' in model)) {
+    return errorResult('unknown', 'A valid section shape and its dimensions are required.');
+  }
+
+  if (model.type === 'composite') {
+    if (!Array.isArray(model.rectangles) || model.rectangles.length === 0 || model.rectangles.some(piece =>
+      !piece || typeof piece.id !== 'string' ||
+      !Number.isFinite(piece.x) || !Number.isFinite(piece.y) ||
+      !Number.isFinite(piece.width) || !Number.isFinite(piece.height)
+    )) {
+      return errorResult('composite', 'Provide at least one rectangle with finite coordinates and dimensions.');
+    }
+  } else {
+    const fieldsByType: Record<Exclude<SectionModel['type'], 'composite'>, string[]> = {
+      rectangle: ['width', 'height'],
+      circle: ['diameter'],
+      'hollow-rectangle': ['outerWidth', 'outerHeight', 'innerWidth', 'innerHeight'],
+      'hollow-circle': ['outerDiameter', 'innerDiameter'],
+      'i-section': ['totalHeight', 'flangeWidth', 'flangeThickness', 'webThickness'],
+      't-section': ['flangeWidth', 'flangeThickness', 'webHeight', 'webThickness'],
+    };
+    const section = model as unknown as Record<string, unknown>;
+    if (fieldsByType[model.type].some(field => {
+      const value = section[field];
+      return typeof value !== 'number' || !Number.isFinite(value);
+    })) {
+      return errorResult(model.type, 'All section dimensions must be finite numbers.');
+    }
+  }
+
   switch (model.type) {
     case 'rectangle':
       return solveRectangle(model.width, model.height);
